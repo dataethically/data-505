@@ -1,0 +1,108 @@
+**Abstract:**
+
+This is a technical blog post of **both** an HTML file *and* [.qmd file](src/wine_of_pnw.qmd) hosted on GitHub pages.
+
+# Setup
+
+**Step Up Code:**
+```{r}
+library(tidyverse) 
+
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/wine.rds"))) %>%
+  filter(province=="Oregon" | province=="California" | province=="New York") %>% 
+  mutate(cherry=as.integer(str_detect(description,"[Cc]herry"))) %>% 
+  mutate(lprice=log(price)) %>% 
+  select(lprice, points, cherry, province)
+str(wine)
+```
+
+**Explanataion:**
+
+> <span style="color:red;font-weight:bold">TODO</span>: *1. filter for province == Oregon, California and New York
+2. create a boolean column called cherry displaying whether or not "cherry" is in the description column
+3. create new column containing the natural log of the price column
+4. select lprice, points, cherry, province so that they are all that is included in output*
+
+# Multiple Regression
+
+## Linear Models
+
+First run a linear regression model with log of price as the dependent variable and 'points' and 'cherry' as features (variables).
+
+```{r}
+m1 <- lm(lprice ~ points + cherry, wine)
+summary(m1)
+```
+
+**Explanataion:**
+
+> <span style="color:red;font-weight:bold">TODO</span>: *1. creates a linear model called m1 that is a multiple regression model which predicts the log of price (lprice) using both the 'points' and 'cherry' variables 2. shows summary statistics for the regression model*
+
+> <span style="color:red;font-weight:bold">TODO</span>: *RMSE = 0.4688. This represents the average distance between the predicted value and the actual value. A value that is low such as this shows the model is accurately predicting the response variable using the explanatory variables*
+
+## Interaction Models
+
+Add an interaction between 'points' and 'cherry'. 
+
+```{r}
+m2 <- lm(lprice ~ points * cherry, wine)
+summary(m2)
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *1. creates a linear regression model called m2 predicting log of price with an interaction between points and cherry 2. provides summary statistics for the model*
+
+> <span style="color:red;font-weight:bold">TODO</span>: *the RMSE is 0.4686, marginally lower than without the interaction term. this shows the interaction of points and cherry is predicting the price slightly better than using each variable individually*
+
+### The Interaction Variable
+
+> <span style="color:red;font-weight:bold">TODO</span>: *a positive coefficient for the interaction term shows that wines with fewer points are not as much higher in price when 'cherry' is used in the description, but wines with more points show a bigger increase in price when 'cherry' is used in the description.* <br>[Explain as you would to a non-technical manager.](https://youtube.com/clip/UgkxY7ohjoimIef6zpPLjgQHqJcJHeZptuVm?feature=shared)
+
+## Applications
+
+Determine which province (Oregon, California, or New York), does the 'cherry' feature in the data affect price most?
+
+```{r}
+or <- wine %>%
+      filter(province == "Oregon")
+lmor <- lm(lprice ~ points + cherry, or)
+summary(lmor)
+
+ca <- wine %>%
+      filter(province == "California")
+lmca <- lm(lprice ~ points + cherry, ca)
+summary(lmca)
+
+ny <- wine %>%
+      filter(province == "New York")
+lmny <- lm(lprice ~ points + cherry, ny)
+summary(lmny)
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *1. filter the data into each province respectively. 2. create linear regression models for the separate data. The price is most affected by the 'cherry' feature in Oregon, because this is where the coefficient for 'cherry' is the highest value .*
+
+# Scenarios
+
+## On Accuracy
+
+Imagine a model to distinguish New York wines from those in California and Oregon. After a few days of work, you take some measurements and note: "I've achieved 91% accuracy on my model!" 
+
+Should you be impressed? Why or why not?
+
+```{r}
+summary(wine)
+province_proportions <- prop.table(table(wine$province))
+print(province_proportions)
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *You might be slightly impressed that the model is doing better than simply guessing, but the skewed proportions of each province in the data make the accuracy pretty questionable*
+
+## On Ethics
+
+Why is understanding this vignette important to use machine learning in an ethical manner?
+
+> <span style="color:red;font-weight:bold">TODO</span>: *I think it is because you must understand the data you are using to create predictions in order to better inform the validity and usefulness of indicators like accuracy percentages*
+
+## Ignorance is no excuse
+Imagine you are working on a model to predict the likelihood that an individual loses their job as the result of the changing federal policy under new presidential administrations. You have a very large dataset with many hundreds of features, but you are worried that including indicators like age, income or gender might pose some ethical problems. When you discuss these concerns with your boss, she tells you to simply drop those features from the model. Does this solve the ethical issue? Why or why not?
+
+> <span style="color:red;font-weight:bold">TODO</span>: *No, not adequately. While it gets rid of the potential ethical problems associated with their inclusion, it also removes the ability to explore those aspects as they might yield meaningful analysis points*
