@@ -1,0 +1,104 @@
+Author: Paxton Jones
+
+**Step Up Code:**
+```{r}
+library(tidyverse)
+library(caret)
+library(fastDummies)
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/wine.rds")))
+```
+
+**Explanataion:**
+
+> <span style="color:red;font-weight:bold">TODO: *write your line-by-line explanation of the code here*
+
+# Feature Engineering
+
+We begin by engineering an number of features.
+
+1. Create a total of 10 features (including points). 
+2. Remove all rows with a missing value. 
+3. Ensure only log(price) and engineering features are the only columns that remain in the `wino` dataframe.
+
+```{r}
+# Feature Engineering
+wino <- wine %>%
+  mutate(
+    lprice = log(price),  # Log transformation of price
+    is_oaky = as.integer(str_detect(description, "oak")),
+    is_fruity = as.integer(str_detect(description, "fruit")),
+    is_full_body = as.integer(str_detect(description, "full body")),
+    price_points = price/points,
+    region_score_avg = ave(points, region_1, FUN = mean),
+    country_popularity = ave(id, country, FUN = length),
+    high_quality = as.integer(points >= 85),
+    med_quality = as.integer(points >= 70 & points <= 85),
+    low_quality = as.integer(points<=70),
+ #   region_country = paste(region, country, sep = "_")
+  ) %>%
+  select(lprice, points, is_oaky, is_fruity, 
+         is_full_body, price_points, region_score_avg, country_popularity, high_quality, med_quality, low_quality) %>%
+  drop_na()
+```
+> <span style="color:red;font-weight:bold">*Adds a column in the dataset.
+Applies a natural logarithm transformation to the price variable to normalize its distribution.
+Checks if the word oak appears in the description column and converts it into a binary feature (1 if present, 0 otherwise).
+Computes price per rating point.
+Computes the average rating (points) per region.
+Counts the number of wines per country as a popularity metric.
+high_quality, med_quality, low_quality: Creates categorical variables based on rating thresholds.
+Selects only selected features.
+Removes rows with missing values.*
+# Caret
+
+We now use a train/test split to evaluate the features.
+
+1. Use the Caret library to partition the wino dataframe into an 80/20 split. 
+2. Run a linear regression with bootstrap resampling. 
+3. Report RMSE on the test partition of the data.
+
+```{r}
+# TODO: hint: Check the slides.
+set.seed(123)
+
+trainIndex <- createDataPartition(wino$lprice, p = 0.8, list = FALSE)
+trainData <- wino[trainIndex, ]
+testData  <- wino[-trainIndex, ]
+
+control <- trainControl(method = "boot", number = 100)
+lm_model <- train(lprice ~ ., data = trainData, method = "lm", trControl = control)
+
+# Predict on test data
+predictions <- predict(lm_model, testData)
+
+# Calculate RMSE
+rmse_value <- sqrt(mean((predictions - testData$lprice)^2))
+print(paste("RMSE:", rmse_value))
+```
+
+> <span style="color:red;font-weight:bold">*Ensures reproducibility of random operations.
+Splits wino into 80% training data and 20% testing data, ensuring a stratified split based on lprice.
+The training dataset (80% of wino).
+The testing dataset (20% of wino).
+Defines the training control with bootstrap resampling (100 iterations).
+Trains a linear regression model (lm method) using the training dataset (trainData).
+Uses bootstrap resampling (trControl = control).
+Uses the trained model to predict lprice values for the test dataset.
+(predictions - testData$lprice)^2: Computes squared errors.
+	print(paste("RMSE:", rmse_value)): Displays the RMSE value.*
+
+# Variable selection
+
+We now graph the importance of your 10 features.
+
+```{r}
+# TODO: hint: Check the slides.
+# Get variable importance
+importance <- varImp(lm_model, scale = TRUE)
+
+# Plot importance
+plot(importance, main = "Feature Importance")
+```
+
+> <span style="color:red;font-weight:bold"> *Computes the importance of each predictor in the model.
+	Visualizes the feature importance.*
