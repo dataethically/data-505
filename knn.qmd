@@ -1,0 +1,145 @@
+---
+title: $K$NN
+author: "Paxton Jones"
+date: "02/10/2025"
+
+format: 
+  html:  
+    theme: superhero  
+    mainfont: monospace
+    highlight-style: github
+    title-block-banner: true
+    embed-resources: true
+
+---
+
+**Abstract:**
+
+This is a technical blog post of **both** an HTML file *and* [.qmd file](https://raw.githubusercontent.com/cd-public/D505/refs/heads/master/hws/src/knn.qmd) hosted on GitHub pages.
+
+# 0. Quarto Type-setting
+
+- This document is rendered with Quarto, and configured to embed an images using the `embed-resources` option in the header.
+- If you wish to use a similar header, here's is the format specification for this document:
+
+```email
+format: 
+  html:
+    embed-resources: true
+```
+
+# 1. Setup
+
+```{r}
+library(tidyverse)
+library(caret)
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/pinot.rds")))
+```
+
+## 2. $K$NN Concepts
+
+> <span style="color:red;font-weight:bold">TODO</span>: *The choice of K reflects a trade off of noise and underfitting. At lower K values, there is more granularity and so nuances and small patterns may be more observable. However, it also introduces the possibility of overfitting due to noise in the data. A higher K value will provide a more smoothed perspective, but may miss some of the smaller trends and have a tendency to underfit the data.*
+
+## 3. Feature Engineering
+
+1. Create a version of the year column that is a *factor* (instead of numeric).
+2. Create dummy variables that indicate the presence of "cherry", "chocolate" and "earth" in the description.
+  - Take care to handle upper and lower case characters.
+3. Create 3 new features that represent the interaction between *time* and the cherry, chocolate and earth inidicators.
+4. Remove the description column from the data.
+
+```{r}
+# your code here
+# 1. Create a version of the year column that is a factor
+wine$year_factor <- as.factor(wine$year)
+
+# 2. Create dummy variables for cherry, chocolate, earth in the description
+#    - Use 'grepl' on the lowercased description to catch both upper and lower cases
+wine$cherry    <- as.numeric(grepl("cherry", tolower(wine$description)))
+wine$chocolate <- as.numeric(grepl("chocolate", tolower(wine$description)))
+wine$earth     <- as.numeric(grepl("earth", tolower(wine$description)))
+
+# 3. Create new features that represent the interaction between 'time' and the dummy variables
+wine$time_cherry    <- wine$year * wine$cherry
+wine$time_chocolate <- wine$year * wine$chocolate
+wine$time_earth     <- wine$year * wine$earth
+
+# 4. Remove the description column from the data
+wine$description <- NULL
+```
+## 4. Preprocessing
+
+1. Preprocess the dataframe from the previous code block using BoxCox, centering and scaling of the numeric features
+2. Create dummy variables for the `year` factor column
+
+```{r}
+# 1) Choose numeric columns for BoxCox (strictly positive + any you want centered/scaled)
+numeric_cols <- c("year", "time_cherry", "time_chocolate", "time_earth")
+
+# 2) Preprocess: BoxCox, Center, Scale
+preProcVals <- preProcess(wine[, numeric_cols], method = c("BoxCox", "center", "scale"))
+wine[, numeric_cols] <- predict(preProcVals, wine[, numeric_cols])
+
+# 3) Dummy variables for your factor column (year_factor)
+dummy_year <- dummyVars(~ year_factor, data = wine)
+year_dummies <- as.data.frame(predict(dummy_year, newdata = wine))
+df <- cbind(wine, year_dummies)
+
+```
+
+
+## 5. Running $K$NN
+
+1. Split the dataframe into an 80/20 training and test set
+2. Use Caret to run a $K$NN model that uses our engineered features to predict province
+  - use 5-fold cross validated subsampling 
+  - allow Caret to try 15 different values for $K$
+3. Display the confusion matrix on the test data
+
+
+```{r}
+# 1) Split 80/20
+set.seed(123)
+wine <- wine %>%
+  mutate(
+    province = as.factor(province)
+  )
+train_index <- createDataPartition(wine$province, p = 0.8, list = FALSE)
+train_data <- wine[train_index, ]
+test_data  <- wine[-train_index, ]
+
+
+# 2) 5-fold cross-validation and tune k from 1..15
+train_ctrl <- trainControl(method = "cv", number = 5)
+knn_grid   <- expand.grid(k = 1:15)
+
+test_data <- test_data[!is.na(test_data$province), ]
+train_data <- train_data[!is.na(train_data$province), ]
+
+knn_model <- train(
+  province ~ .,
+  data = train_data,
+  method = "knn",
+  trControl = train_ctrl,
+  tuneGrid = knn_grid
+)
+
+# Check the trained model
+print(knn_model)
+
+# 3) Confusion matrix on test set
+test_preds <- predict(knn_model, newdata = test_data)
+confusionMatrix(test_preds, test_data$province)
+```
+
+## 6. Kappa
+
+How do we determine whether a Kappa value represents a good, bad or some other outcome?
+
+> <span style="color:red;font-weight:bold">TODO</span>: *A higher Kappa value means that the model is more closely matching the predicted and actual values when accounting for the chances of this happening randomly.While this means that generally higher Kappa values are indicative of better accuracy in the model, whether the kappa value represents a good, bad or other outcome depends on the context and the class distribution of the data. Higher-precision fields like medicine might be inclined to look for higher p-values than marketing departments, for example. In this case, the Kappa value is skewed because while the model is okay at predicting if a wine is from California or not, it lacks any accuracy at all in identifying smaller classes. *
+
+## 7. Improvement
+
+How can we interpret the confusion matrix, and how can we improve in our predictions?
+
+> <span style="color:red;font-weight:bold">TODO</span>: *The rows are the predicted classes, and the columns are the actual classes. Diagonal cells, where row=col are correct predictions. California wines are often correctly predicted (526), but many other classes also get misclassified as California. Oregon has a decent number of correct hits (212), but it also gets predicted incorrectly as California (290 times). Smaller classes (e.g., “New_York”, “Casablanca_Valley”) have fewer correct predictions and get confused with larger classes.*
