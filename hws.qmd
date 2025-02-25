@@ -1,0 +1,113 @@
+---
+title: "Classification"
+author: "Paxton Jones"
+date: "02/24/2025"
+
+---
+
+**Abstract:**
+
+This is a technical blog post of **both** an HTML file *and* [.qmd file](https://raw.githubusercontent.com/cd-public/D505/refs/heads/master/hws/src/classify.qmd) hosted on GitHub pages.
+
+# 0. Quarto Type-setting
+
+- This document is rendered with Quarto, and configured to embed an images using the `embed-resources` option in the header.
+- If you wish to use a similar header, here's is the format specification for this document:
+
+```email
+format: 
+  html:
+    embed-resources: true
+```
+
+# 1. Setup
+
+**Step Up Code:**
+
+```{r}
+sh <- suppressPackageStartupMessages
+sh(library(tidyverse))
+sh(library(caret))
+sh(library(naivebayes))
+sh(library(tidytext))
+sh(library(SnowballC))
+sh(library(glmnet))
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/pinot.rds")))
+```
+
+# 2. Logistic Concepts
+
+Why do we call it Logistic Regression even though we are using the technique for classification?
+
+> <span style="color:red;font-weight:bold">TODO</span>: *•	Despite producing a discrete class label in the end it is still fitting a continuous function (the linear predictor) and applying a logistic transformation. k-NN, Naive Bayes, or Decision Trees do not involve fitting a linear function to data. Instead, they are based on different principles (distance to neighbors, conditional probabilities under independence assumptions, recursive partitioning, etc.). In contrast, logistic regression is an extension of linear regression techniques into the domain of classification by using the log-odds.*
+
+# 3. Modeling
+
+We train a logistic regression algorithm to classify a whether a wine comes from Marlborough using:
+
+1. An 80-20 train-test split.
+2. Three features engineered from the description
+3. 5-fold cross validation.
+
+We report Kappa after using the model to predict provinces in the holdout sample.
+
+```{r}
+wine_words <- function(df, j, stem){ 
+  words <- df %>%
+    unnest_tokens(word, description) %>%
+    anti_join(stop_words) %>% 
+    filter(!(word %in% c("wine","pinot","vineyard")))
+  
+  if(stem){
+    words <- words %>% mutate(word = wordStem(word))
+  }
+  
+  words %>% count(id, word) %>%  group_by(id) %>%  mutate(exists = (n>0)) %>% 
+    ungroup %>% group_by(word) %>%  mutate(total = sum(n)) %>% filter(total > j) %>% 
+    pivot_wider(id_cols = id, names_from = word, values_from = exists, values_fill = list(exists=0)) %>% 
+    right_join(select(df,id,province)) %>% select(-id) %>% mutate(across(-province, ~replace_na(.x, F)))
+}
+
+wino <- wine_words(wine, 500, F)
+wino <- wino %>% 
+  mutate(marlborough = factor(province=="Marlborough")) %>%
+  select(-province)
+
+wine_index <- createDataPartition(wino$marlborough, p = 0.80, list = FALSE)
+train <- wino[ wine_index, ]
+test <- wino[-wine_index, ]
+
+control = trainControl(method = "cv", number = 5)
+get_fit <- function(df) {
+  train(marlborough ~ drink + bodied + finish + aromas + cherry + fruit,
+        data = df, 
+        trControl = control,
+        method = "glm",
+        family = "binomial")
+        # speed it up - default 100
+}
+fit <- get_fit(train)
+pred <- factor(predict(fit, newdata = test))
+confusionMatrix(pred,factor(test$marlborough))
+```
+Kappa = 0.1221
+
+# 4. Binary vs Other Classification
+
+What is the difference between determining some form of classification through logistic regression versus methods like $K$-NN and Naive Bayes which performed classifications. 
+
+> <span style="color:red;font-weight:bold">TODO</span>: *logistic regression is a parametric model with interpretable coefficients and a linear boundary, while K-NN and Naive Bayes use different philosophies — nearest-neighbor classification and probabilistic modeling under independence assumptions, respectively — to separate classes.*
+
+
+# 5. ROC Curves
+
+We can display an ROC for the model to explain your model's quality.
+
+```{r}
+library(pROC)
+prob <- predict(fit, newdata = test, type = "prob")[,2]
+myRoc <- roc(test$marlborough, prob)
+plot(myRoc)
+```
+
+> <span style="color:red;font-weight:bold">TODO</span>: *The model seems to perform well, as the ROC curve is above the diagonal baseline, indicating good discrimination between positive and negative classes.*
