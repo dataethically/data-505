@@ -1,0 +1,184 @@
+---
+title: "Model 1"
+author: "Paxton Jones, Andrew Cerqui"
+date: "03/10/2025"
+---
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(caret)
+library(tidytext)
+library(SnowballC)
+library(fastDummies)
+```
+
+```{r}
+# Load the wine dataset
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/model.rds")))
+wine1 <- read_csv('wine.csv')
+
+# Function to extract word features from descriptions. Add id column if not present
+wine_words <- function(df, j, stem){ 
+  if(!"id" %in% colnames(df)) {
+    df$id <- 1:nrow(df)
+  }
+  words <- df %>%
+    unnest_tokens(word, description) %>%
+    anti_join(stop_words) %>% 
+    filter(!(word %in% c("wine","pinot","vineyard")))
+  
+  if(stem){
+    words <- words %>% mutate(word = wordStem(word))
+  }
+  
+  words %>% count(id, word) %>%  group_by(id) %>%  mutate(exists = (n>0)) %>% 
+    ungroup %>% group_by(word) %>%  mutate(total = sum(n)) %>% filter(total > j) %>% 
+    pivot_wider(id_cols = id, names_from = word, values_from = exists, values_fill = list(exists=0)) %>% 
+    right_join(select(df,id,province)) %>% select(-id) %>% mutate(across(-province, ~replace_na(.x, F)))
+}
+```
+
+```{r}
+# Extract province-specific characteristics
+province_stats <- wine %>%
+  group_by(province) %>%
+  summarize(
+    avg_price = mean(price, na.rm = TRUE),
+    avg_points = mean(points, na.rm = TRUE),
+    avg_year = mean(year, na.rm = TRUE),
+    count = n()
+  )
+
+print("Province statistics:")
+print(province_stats)
+```
+
+```{r}
+# Create detailed price tiers for better discrimination
+price_breaks <- c(0, 15, 25, 40, 60, 100, Inf)
+price_labels <- c("budget", "value", "mid", "premium", "luxury", "ultra_premium")
+
+# Create basic engineered features
+engineered_wine <- wine %>%
+  mutate(
+    # Convert province to factor
+    province = factor(province),
+    
+    # Price features with multiple transformations
+    log_price = log(price),
+    sqrt_price = sqrt(price),
+    price_per_point = price / points,
+    points_per_price = points / price,
+    
+    # Price brackets (more detailed than before)
+    price_bracket = cut(price, breaks = price_breaks, labels = price_labels, right = FALSE),
+    
+    # Points features - create more detailed categorization
+    points_bracket = case_when(
+      points >= 95 ~ "outstanding",
+      points >= 90 ~ "excellent",
+      points >= 85 ~ "very_good",
+      points >= 80 ~ "good",
+      TRUE ~ "average"
+    ),
+    
+    # Year features
+    wine_age = 2025 - year,
+    is_recent = wine_age <= 3,
+    is_medium_age = wine_age > 3 & wine_age <= 10, 
+    is_aged = wine_age > 10,
+    
+    # Year brackets by decade
+    decade = paste0(floor(year/10)*10, "s"),
+
+    # Price-points interactions (help distinguish high-end regions from value regions)
+    high_price_high_points = (price > 60 & points >= 90),
+    low_price_high_points = (price <= 25 & points >= 90),
+    value_ratio = points / (log(price) + 1), # Higher for value regions
+    
+    # Description length
+    desc_length = nchar(description),
+    word_count = str_count(description, "\\w+"),
+    
+    # Interaction terms
+    young_high_price = (wine_age <= 5 & price > 40),
+    aged_high_price = (wine_age > 10 & price > 40),
+    
+    # Region-specific indicators
+    # California features
+    is_napa = str_detect(tolower(description), "napa|oakville|rutherford|howell|carneros"),
+    is_sonoma = str_detect(tolower(description), "sonoma|russian river|dry creek"),
+    
+    # Oregon features
+    is_willamette = str_detect(tolower(description), "willamette|dundee|chehalem|eola"),
+    
+    # Burgundy features
+    is_cote_dor = str_detect(tolower(description), "côte|cote|beaune|nuits|chambertin|romanée|vosne"),
+    
+    # Marlborough features
+    is_sauvignon = str_detect(tolower(description), "sauvignon|blanc"),
+    is_awatere = str_detect(tolower(description), "awatere|wairau"),
+    
+    # Style indicators that can differentiate regions
+    is_elegant = str_detect(tolower(description), "elegant|finesse|subtle|refined"),
+    is_powerful = str_detect(tolower(description), "powerful|bold|rich|intense|concentrated"),
+    is_fruity = str_detect(tolower(description), "fruit|berry|cherry|plum|currant"),
+    is_earthy = str_detect(tolower(description), "earth|soil|mineral|stone|slate|flint"),
+    is_oaky = str_detect(tolower(description), "oak|toast|vanilla|spice|cedar"),
+    is_tannic = str_detect(tolower(description), "tannin|structure|firm|grip"),
+    is_acidic = str_detect(tolower(description), "acid|bright|crisp|fresh"),
+    is_herbal = str_detect(tolower(description), "herb|grass|vegetal|green"),
+    is_floral = str_detect(tolower(description), "floral|flower|blossom|rose|violet"),
+    is_spicy = str_detect(tolower(description), "spice|pepper|cinnamon|clove"),
+    is_jammy = str_detect(tolower(description), "jam|ripe|lush|opulent"),
+    is_new_oak = str_detect(tolower(description), "new oak|french oak|american oak"),
+    is_high_alcohol = str_detect(tolower(description), "high alcohol|alcoholic|hot"),
+    
+    # Country indicators
+    mentions_california = str_detect(tolower(description), "california"),
+    mentions_oregon = str_detect(tolower(description), "oregon"),
+    mentions_france = str_detect(tolower(description), "france|french"),
+    mentions_burgundy = str_detect(tolower(description), "burgundy|bourgogne"),
+    mentions_nz = str_detect(tolower(description), "new zealand|marlborough"),
+    mentions_chile = str_detect(tolower(description), "chile|chilean")
+  )
+```
+
+```{r}
+# Create dummy variables for categorical features
+wine_dummies <- dummy_cols(engineered_wine, 
+                          select_columns = c("price_bracket", "points_bracket", "decade"),
+                          remove_selected_columns = TRUE)
+
+# Extract word features that occur at least 100 times
+word_features <- wine_words(wine, 100, FALSE)
+
+# Combine all features
+all_features <- word_features %>%
+  select(-province) %>%
+  bind_cols(wine_dummies %>% 
+              select(-province, -price, -points, -year, -description)) %>%
+  bind_cols(wine_dummies %>% select(province))
+
+# Check dimensions
+cat("Number of features:", ncol(all_features) - 1, "\n")
+
+# Save the engineered dataset
+saveRDS(all_features, "group_6_knn.rds")
+```
+
+```{r}
+wine <- readRDS("group_6_knn.rds") # or url
+split <- createDataPartition(wine$province, p = 0.8, list = FALSE)
+train <- wine[split, ]
+test <- wine[-split, ]
+fit <- train(province ~ .,
+             data = train, 
+             method = "knn",
+             tuneLength = 15,
+             metric = "Kappa",
+             trControl = trainControl(method = "cv", number = 5, verboseIter = TRUE))
+confusionMatrix(predict(fit, test),factor(test$province))$overall['Kappa']
+```
+
