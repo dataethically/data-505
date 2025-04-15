@@ -1,0 +1,207 @@
+---
+title: "Model 2: Feature Engineering for Churn Prediction"
+author: "Group 6"
+date: "April 14, 2025"
+format: html
+---
+
+This document presents a binary classification model to predict customer churn using feature engineering. We'll create exactly 5 engineered features that maximize the Kappa score.
+
+## Setup
+
+Load the required libraries:
+
+```{r setup}
+library(tidyverse)
+library(caret)
+```
+
+## Load Data
+
+Load the BankChurners dataset:
+
+```{r load-data}
+# Read the data
+bank <- readRDS(gzcon(url("https://cd-public.github.io/D505/dat/BankChurners.rds")))
+
+bank <- bank %>% mutate(Revenue = Total_Revolving_Bal/5 +  Total_Trans_Ct/4 - 15 * Contacts_Count_12_mon)
+
+# Check the data structure
+glimpse(bank)
+```
+
+## Feature Engineering
+
+Create the 5 engineered features based on extensive analysis of feature importance and correlation:
+
+```{r feature-engineering}
+bank_engineered <- bank %>%
+  mutate(
+    # Feature 1: Enhanced Churn Risk Score v2
+    # Combines inactive months, contact frequency, relationship depth, and transaction volatility
+    enhanced_churn_risk_v2 = (Months_Inactive_12_mon / 12) * (Contacts_Count_12_mon / 4) *
+                          (1 / (Total_Relationship_Count + 0.1)) *
+                          (1 / (abs(Total_Ct_Chng_Q4_Q1) + 0.5)) * 0.6 +
+                          (Contacts_Count_12_mon / (pmax(Total_Trans_Ct, 1)) * 10 / 10) * 0.4,
+    
+    # Feature 2: Customer Activity Score
+    # Focuses on transaction patterns and inactivity
+    customer_activity_score = (log1p(Total_Trans_Ct) * 0.5) + 
+                            ((Total_Ct_Chng_Q4_Q1 + 1) * 0.3) - 
+                            (Months_Inactive_12_mon / 12 * 0.2),
+    
+    # Feature 3: Contact-to-Transaction Ratio
+    # Measures support needs relative to transaction activity
+    contact_transaction_ratio = Contacts_Count_12_mon / 
+                              (pmax(Total_Trans_Ct, 1)) * 10,
+    
+    # Feature 4: Complex Engagement Score
+    # Non-linear combination of key activity metrics
+    complex_engagement = (Total_Trans_Ct / 70)^0.8 * 
+                       (Total_Relationship_Count / 4)^0.7 * 
+                       (1 - (Months_Inactive_12_mon / 12))^1.2,
+    
+    # Feature 5: Hybrid Score v2
+    # Comprehensive engagement metric with revenue component
+    hybrid_score_v2 = ((Total_Relationship_Count * 0.25) + 
+                     (Total_Trans_Ct * 0.35) - 
+                     (Months_Inactive_12_mon * 0.25) +
+                     (Revenue / 500 * 0.15) +
+                     ((Total_Trans_Ct / 70) * 
+                     (Total_Relationship_Count / 4) * 
+                     (12 - Months_Inactive_12_mon) / 12)) / 2
+  )
+```
+
+## Select Features for Model
+
+Extract only the engineered features and the target variable:
+
+```{r select-features}
+# Select only the engineered features plus Churn column for the model
+bank_model <- bank_engineered %>%
+  select(enhanced_churn_risk_v2, customer_activity_score, 
+         contact_transaction_ratio, complex_engagement, 
+         hybrid_score_v2, Churn)
+
+# Preview the engineered features
+head(bank_model)
+```
+
+## Explore Feature Distributions
+
+Visualize the distributions of the engineered features by churn status:
+
+```{r feature-visualization}
+# Convert Churn to a factor for better visualization
+bank_model$Churn <- factor(bank_model$Churn, levels = c("no", "yes"))
+
+# Create a long format version for easier plotting
+bank_model_long <- bank_model %>%
+  pivot_longer(cols = -Churn, 
+               names_to = "Feature", 
+               values_to = "Value")
+
+# Plot distributions
+ggplot(bank_model_long, aes(x = Value, fill = Churn)) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~ Feature, scales = "free") +
+  theme_minimal() +
+  labs(title = "Distribution of Engineered Features by Churn Status",
+       x = "Feature Value", 
+       y = "Density") +
+  scale_fill_brewer(palette = "Set1")
+```
+
+## Train Model
+
+Train a logistic regression model using 5-fold cross-validation:
+
+```{r train-model}
+# Set seed for reproducibility
+set.seed(123)
+
+# Train the model
+model <- train(Churn ~ ., 
+               data = bank_model,
+               trControl = trainControl(method = "cv", number = 5),
+               method = "glm",
+               family = "binomial",
+               maxit = 5)
+
+# Display results
+print(model)
+print(paste("Kappa value:", model$results[["Kappa"]]))
+```
+
+## Feature Importance
+
+Examine the coefficients to understand feature importance:
+
+```{r feature-importance}
+# Extract coefficients
+coef_values <- coef(model$finalModel)
+coef_df <- data.frame(
+  Feature = names(coef_values),
+  Coefficient = as.numeric(coef_values)
+) %>%
+  slice(-1)  # Remove intercept
+
+# Plot feature importance
+ggplot(coef_df, aes(x = reorder(Feature, abs(Coefficient)), y = Coefficient)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Feature Importance (Absolute Coefficient Values)",
+       x = "Feature",
+       y = "Coefficient")
+```
+
+## Save the Dataframe
+
+Save the engineered dataset for submission:
+
+```{r save-dataframe}
+# Save the dataframe
+write_rds(bank_model, file = "model_2.rds")
+print("Saved dataframe to model_2.rds")
+```
+
+## Assessment Verification
+
+Verify that our assessment matches the expected format from the assignment:
+
+```{r assessment}
+# Verify the assessment matches the expected format
+assessment <- train(Churn ~ ., 
+                   data = bank_model %>% select(1, 2, 3, 4, 5, grep("Churn", colnames(bank_model))),
+                   trControl = trainControl(method = "cv", number = 5),
+                   method = "glm",
+                   family = "binomial",
+                   maxit = 5)
+
+print(assessment)
+print(paste("Assessment Kappa value:", assessment$results[["Kappa"]]))
+```
+
+## Feature Descriptions
+
+### Enhanced Churn Risk v2
+
+This feature combines multiple risk signals: inactive months, contact frequency, relationship depth, and transaction volatility. Higher values indicate greater churn probability. The feature captures both direct risk indicators (inactivity) and their interactions.
+
+### Customer Activity Score
+
+This metric measures overall transaction engagement and activity trajectory. It uses log-transformed transaction count to capture diminishing returns, rewards transaction growth, and penalizes inactivity.
+
+### Contact-to-Transaction Ratio
+
+This ratio measures the "maintenance cost" per transaction and is a good predictor of customer dissatisfaction or account problems. Higher values often indicate customers requiring more support relative to their activity level.
+
+### Complex Engagement
+
+This non-linear engagement measure uses power transformations to capture the interaction between transaction activity, relationship depth, and recency. The non-linear transformation helps capture diminishing returns and interaction effects.
+
+### Hybrid Score v2
+
+This comprehensive engagement metric incorporates relationship count (product breadth), transaction count (activity level), inactivity penalty, revenue component (customer value), and interaction terms between transactions, relationships, and activity.
