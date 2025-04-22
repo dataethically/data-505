@@ -1,0 +1,66 @@
+---
+title: "Final Page"
+author: "Team 6"
+date: "2025-04-22"
+---
+
+```{r setup-environment}
+library(tidyverse)
+library(caret
+```
+
+```{r final-engineer-function}
+##########################################
+# Feature Engineering Final Implementation
+##########################################
+engineer <- function(df) {
+  safe_numeric <- function(x) {
+    if (is.numeric(x)) return(x)
+    result <- suppressWarnings(as.numeric(as.character(x)))
+    result[is.na(result)] <- 0
+    return(result)
+  }
+  
+  safe_divide <- function(x, y) {
+    result <- x / y
+    result[is.infinite(result) | is.nan(result)] <- 0
+    return(result)
+  }
+  
+  df$`Units Sold` <- safe_numeric(df$`Units Sold`)
+  df$`BOM Cost` <- safe_numeric(df$`BOM Cost`)
+  df$`Revenue 2019 to present` <- safe_numeric(df$`Revenue 2019 to present`)
+  df$`retailPrice` <- safe_numeric(df$`retailPrice`)
+  df$`Unit Weight (pounds)` <- safe_numeric(df$`Unit Weight (pounds)`)
+  df$`Number of Components` <- safe_numeric(df$`Number of Components`)
+  
+  df$TotalCost <- df$`BOM Cost` * df$`Units Sold`
+  df$TotalCostValue <- df$TotalCost
+  df$ProfitMargin <- safe_divide(df$`Revenue 2019 to present` - df$TotalCost, df$`Revenue 2019 to present`)
+  df$CostToRevenueRatio <- safe_divide(df$TotalCost, df$`Revenue 2019 to present`)
+  df$RevenueScale <- log1p(df$`Revenue 2019 to present`)
+  df$Volume <- log1p(df$`Units Sold`)
+  df$UnitContribution <- df$retailPrice - df$`BOM Cost`
+  df$ComponentComplexity <- log1p(df$`Number of Components`)
+  df$PriceTier <- as.numeric(
+    ifelse(df$retailPrice < 20, 0,
+           ifelse(df$retailPrice < 50, 1,
+                  ifelse(df$retailPrice < 100, 2, 3)))
+  )
+  df$MarkupRatio <- safe_divide(df$retailPrice, df$`BOM Cost`)
+  df$WeightEfficiency <- safe_divide(1, pmax(0.1, df$`Unit Weight (pounds)`))
+  
+  return(df[, c(
+    "TotalCostValue", 
+    "ProfitMargin", 
+    "CostToRevenueRatio", 
+    "RevenueScale", 
+    "Volume", 
+    "UnitContribution", 
+    "ComponentComplexity", 
+    "PriceTier", 
+    "MarkupRatio", 
+    "WeightEfficiency"
+  )])
+}
+```
